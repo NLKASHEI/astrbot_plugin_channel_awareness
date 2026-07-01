@@ -51,7 +51,7 @@ class ChannelAwareness(Star):
 
     # ========== 跨频道搜索 ==========
 
-    @filter.llm_tool(name="搜索频道消息")
+    @filter.llm_tool(name="search_channel_messages")
     async def search_tool(self, event: AstrMessageEvent, keyword: str) -> str:
         """在服务器各频道搜索包含关键词的历史消息，返回消息链接。Args: keyword(string): 搜索关键词"""
         results = await self._search(event, keyword)
@@ -92,7 +92,7 @@ class ChannelAwareness(Star):
 
     # ========== 频道总结 ==========
 
-    @filter.llm_tool(name="总结频道消息")
+    @filter.llm_tool(name="summarize_channel")
     async def summarize_tool(self, event: AstrMessageEvent) -> str:
         """总结当前频道最近的消息内容。当用户说「总结一下」「最近在聊什么」时调用。"""
         summary = await self._summarize(event)
@@ -135,7 +135,7 @@ class ChannelAwareness(Star):
 
     # ========== 用户信息 ==========
 
-    @filter.llm_tool(name="获取用户信息")
+    @filter.llm_tool(name="get_user_profile")
     async def profile_tool(self, event: AstrMessageEvent) -> str:
         """获取当前发消息用户的 Discord 个人信息（用户名、加入时间、角色等）。"""
         info = self._get_user_profile(event)
