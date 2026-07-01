@@ -1,29 +1,42 @@
 # -*- coding: utf-8 -*-
 """
-astrbot_plugin_channel_awareness - 频道感知 + 搜索 + 总结 + 用户信息
+astrbot_plugin_channel_awareness - 频道感知 + 搜索 + 总结 + 用户信息 v1.2
 
 对齐类脑娘 Discord 能力：
-1. on_llm_request 注入频道上下文
-2. /搜索 + AI工具 → 跨频道搜消息
-3. /总结 + AI工具 → 频道消息总结
-4. /用户信息 + AI工具 → Discord 用户信息查询
+1. on_llm_request 注入频道上下文（自动感知服务器/论坛/帖子位置）
+2. /搜索 + AI工具 → 跨频道搜索历史消息
+3. /总结 + AI工具 → 频道消息总结（Bot人格注入）
+4. /用户信息 + AI工具 → 用户个人信息查询
+- WebUI 可配置搜索/总结参数
 """
 
 import re
 import asyncio
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
-from astrbot.api import logger
-
-SEARCH_LIMIT = 50
-MAX_RESULTS = 5
-MAX_CHANNELS = 10
-SUMMARY_LIMIT = 30  # 总结时读取的消息数
+from astrbot.api import logger, AstrBotConfig
 
 
 class ChannelAwareness(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
+        cfg = config or {}
+        self.search_limit = int(cfg.get("search_limit", 50))
+        self.max_results = int(cfg.get("max_results", 5))
+        self.max_channels = int(cfg.get("max_channels", 10))
+        self.summary_limit = int(cfg.get("summary_limit", 30))
+
+    # ==================== 人格读取 ====================
+
+    async def _get_persona(self, event: AstrMessageEvent) -> tuple[str, str]:
+        try:
+            pm = self.context.persona_manager
+            persona = await pm.get_default_persona_v3(umo=event.unified_msg_origin)
+            if persona:
+                return persona.get("name", "棱镜娘"), persona.get("prompt", "")
+        except Exception:
+            pass
+        return "棱镜娘", ""
 
     # ========== 频道感知 ==========
 
@@ -62,9 +75,9 @@ class ChannelAwareness(Star):
         if not keyword.strip():
             yield event.plain_result("想找什么？告诉我关键词～\n例如: /搜索 角色卡")
             return
-        yield event.plain_result("  正在搜...")
+        yield event.plain_result("🔍 正在搜索...")
         results = await self._search(event, keyword)
-        yield event.plain_result("\n".join(results[:MAX_RESULTS]) if results else f"没找到「{keyword}」")
+        yield event.plain_result("\n".join(results[:self.max_results]) if results else f"没找到「{keyword}」")
 
     async def _search(self, event: AstrMessageEvent, keyword: str) -> list:
         raw = event.message_obj.raw_message if event.message_obj else None
@@ -74,17 +87,17 @@ class ChannelAwareness(Star):
         kw = keyword.lower()
         results, cc = [], 0
         for ch in guild.text_channels:
-            if cc >= MAX_CHANNELS or len(results) >= MAX_RESULTS: break
+            if cc >= self.max_channels or len(results) >= self.max_results: break
             me = getattr(guild, "me", None)
             if me and hasattr(ch, "permissions_for") and not ch.permissions_for(me).read_message_history: continue
             try:
-                async for msg in ch.history(limit=SEARCH_LIMIT):
+                async for msg in ch.history(limit=self.search_limit):
                     content = getattr(msg, "content", "")
                     if kw in content.lower() and not msg.author.bot:
                         preview = content[:100].replace("\n", " ")
                         link = f"https://discord.com/channels/{guild.id}/{ch.id}/{msg.id}"
                         results.append(f"📌 **#{ch.name}** — {msg.author.display_name}:\n   \"{preview}{'...' if len(content)>100 else ''}\"\n   {link}")
-                        if len(results) >= MAX_RESULTS: break
+                        if len(results) >= self.max_results: break
                 cc += 1
             except Exception: continue
         if results: results.insert(0, f"🔍 搜索「{keyword}」:")
@@ -110,8 +123,9 @@ class ChannelAwareness(Star):
         ch = getattr(raw, "channel", None)
         if not ch: return "无法获取当前频道。"
         try:
+            bot_name, persona_prompt = await self._get_persona(event)
             messages = []
-            async for msg in ch.history(limit=SUMMARY_LIMIT):
+            async for msg in ch.history(limit=self.summary_limit):
                 content = getattr(msg, "content", "")
                 if content and not msg.author.bot:
                     messages.append(f"{msg.author.display_name}: {content}")
@@ -121,12 +135,13 @@ class ChannelAwareness(Star):
             umo = event.unified_msg_origin
             pid = await self.context.get_current_chat_provider_id(umo=umo)
             if pid:
+                persona_hint = f"请以{bot_name}的口吻和性格" if persona_prompt else "请"
                 resp = await self.context.llm_generate(
                     chat_provider_id=pid,
-                    prompt=f"请用简短的语言总结以下聊天内容（100字以内），让没有参与聊天的人也能快速了解大家在聊什么：\n\n{text}"
+                    prompt=f"{persona_hint}用简短的语言总结以下聊天内容（100字以内），让没有参与聊天的人也能快速了解大家在聊什么：\n\n{text}"
                 )
                 if resp and resp.completion_text:
-                    return f"📋 最近 {SUMMARY_LIMIT} 条消息的总结:\n{resp.completion_text.strip()}"
+                    return f"## 📋 频道消息总结\n\n{resp.completion_text.strip()}"
             return "AI 总结暂时不可用。"
 
         except Exception as e:
