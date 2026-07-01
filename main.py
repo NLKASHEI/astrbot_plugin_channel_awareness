@@ -6,7 +6,7 @@ astrbot_plugin_channel_awareness - 频道感知 + 搜索 + 总结 + 用户信息
 1. on_llm_request 注入频道上下文
 2. /搜索 + AI工具 → 跨频道搜消息
 3. /总结 + AI工具 → 频道消息总结
-4. /whois + AI工具 → 用户信息查询
+4. /用户信息 + AI工具 → Discord 用户信息查询
 """
 
 import re
@@ -141,8 +141,9 @@ class ChannelAwareness(Star):
         info = self._get_user_profile(event)
         return info
 
-    @filter.command("whois")
-    async def cmd_whois(self, event: AstrMessageEvent):
+    @filter.command("用户信息")
+    async def cmd_user_info(self, event: AstrMessageEvent):
+        """查看当前用户的 Discord 个人信息"""
         info = self._get_user_profile(event)
         yield event.plain_result(info)
 
